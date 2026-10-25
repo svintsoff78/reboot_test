@@ -11,3 +11,8 @@ __pycache__/
 .pytest_cache/
 .vite/
 .DS_Store
+.claude/
+REBOOT_ТЗ_Fullstack.pdf
+e2e/shots/
+e2e/results.json
+e2e/*.html

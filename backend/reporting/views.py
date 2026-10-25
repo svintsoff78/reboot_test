@@ -16,7 +16,12 @@ def studios(request):
 
 @require_GET
 def report(request):
-    start, end = request.GET.get("start", "2026-04-01"), request.GET.get("end", "2026-04-30")
+    start, end = request.GET.get("start"), request.GET.get("end")
+    if (start is None) != (end is None):
+        # Иначе вторая дата молча бралась бы из апреля и отчёт был бы не за тот период.
+        return JsonResponse({"error": "Укажите обе даты периода (start и end) или ни одной."}, status=400)
+    if start is None:
+        start, end = "2026-04-01", "2026-04-30"
     studio = request.GET.get("studio", "")
     if studio and not Studio.objects.filter(pk=studio).exists():
         return JsonResponse({"error": "Неизвестная студия."}, status=400)
