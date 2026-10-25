@@ -142,10 +142,24 @@ class MoneyRulesTests(TestCase):
         """Окно до 93 дней включительно; неверные даты и переполнение — 400 с error."""
         self.assertEqual(self.client.get("/api/report/", {"start": "2026-04-01", "end": "2026-07-02"}).status_code, 200)
         for params in ({"start": "2026-04-01", "end": "2026-07-03"}, {"start": "2026-4-1", "end": "2026-04-30"},
-                       {"start": "9999-12-31", "end": "9999-12-31"}, {"start": "2026-02-30", "end": "2026-03-01"}):
+                       {"start": "9999-12-31", "end": "9999-12-31"}, {"start": "0001-01-01", "end": "0001-01-01"},
+                       {"start": "2026-02-30", "end": "2026-03-01"}, {"start": "", "end": ""},
+                       {"start": "2026-04-01T00:00", "end": "2026-04-30"}, {"start": "20260401", "end": "20260430"}):
             response = self.client.get("/api/report/", params)
             self.assertEqual(response.status_code, 400, params)
             self.assertIn("error", response.json())
+
+    def test_both_dates_or_none(self):
+        """Без дат — апрель; одна дата без второй — 400, а не молчаливая подстановка апреля."""
+        self.assertEqual(self.client.get("/api/report/").json()["filters"], {"start": "2026-04-01", "end": "2026-04-30", "studio": ""})
+        for params in ({"start": "2026-05-01"}, {"end": "2026-05-31"}):
+            response = self.client.get("/api/report/", params)
+            self.assertEqual(response.status_code, 400, params)
+            self.assertIn("обе даты", response.json()["error"])
+
+    def test_get_only(self):
+        """API только на чтение."""
+        self.assertEqual(self.client.post("/api/report/").status_code, 405)
 
 
 class SeedDatasetTests(TestCase):
