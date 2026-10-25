@@ -10,16 +10,22 @@ export interface Report {
   filters: Filters; summary: Metrics; daily: Daily[]; studios: (Studio & Metrics)[]; operations: Operation[]
 }
 
-async function get<T>(path: string): Promise<T> {
-  const response = await fetch(path)
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(path, { signal })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new Error('Нет связи с сервером. Проверьте, что backend запущен.')
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    throw new Error(body.error || `Ошибка сервера (${response.status}).`)
+    throw new Error(body.error || `Сервер не ответил (код ${response.status}). Попробуйте ещё раз.`)
   }
   return response.json() as Promise<T>
 }
-export function fetchReport(filters: Filters): Promise<Report> {
-  return get<Report>(`/api/report/?${new URLSearchParams({ ...filters })}`)
+export function fetchReport(filters: Filters, signal?: AbortSignal): Promise<Report> {
+  return get<Report>(`/api/report/?${new URLSearchParams({ ...filters })}`, signal)
 }
 export async function fetchStudios(): Promise<Studio[]> {
   return (await get<{ studios: Studio[] }>('/api/studios/')).studios
