@@ -1,64 +1,84 @@
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
+from django.db.models import Min
 from reporting.models import Event, Studio
 
 MOSCOW = ZoneInfo("Europe/Moscow")
+MAX_DAYS = 93
 
 
-def date_bounds(start, end):
+def parse_period(start, end):
     first, last = date.fromisoformat(start), date.fromisoformat(end)
-    if first.isoformat() != start or last.isoformat() != end or first > last or (last - first).days > 92:
+    if first.isoformat() != start or last.isoformat() != end or first > last or (last - first).days >= MAX_DAYS:
         raise ValueError("Укажите период от 1 до 93 дней, начало не позже окончания.")
-    return (datetime.combine(first, time.min, timezone.utc),
-            datetime.combine(last + timedelta(days=1), time.min, timezone.utc))
+    return first, last
 
 
-def unique_transactions(rows):
-    seen = set()
-    result = []
-    for row in rows:
-        if row.transaction_id not in seen:
-            seen.add(row.transaction_id)
-            result.append(row)
-    return result
+def date_bounds(first, last):
+    """Окно [полночь первого дня; полночь дня после последнего) по Москве."""
+    return (datetime.combine(first, time.min, MOSCOW),
+            datetime.combine(last + timedelta(days=1), time.min, MOSCOW))
 
 
-def metrics(payments, refunds):
+def money_events(lower, upper, studio):
+    """Успешные денежные транзакции окна, по одной на transaction_id.
+
+    Журнал хранит доставки: повтор с тем же transaction_id не является новым движением денег.
+    Транзакция относится к моменту её первой успешной доставки, поэтому повтор,
+    доставленный уже после границы окна, не попадёт во второе окно.
+    """
+    success = Event.objects.filter(status="success")
+    if studio:
+        success = success.filter(order__studio_id=studio)
+    firsts = (success.values("transaction_id").annotate(first=Min("occurred_at"))
+              .filter(first__gte=lower, first__lt=upper))
+    first_at = {row["transaction_id"]: row["first"] for row in firsts}
+    rows = (success.filter(transaction_id__in=first_at).select_related("order")
+            .order_by("occurred_at", "event_id"))
+    unique = {}
+    for e in rows:
+        if e.occurred_at == first_at[e.transaction_id]:
+            unique.setdefault(e.transaction_id, e)
+    return sorted(unique.values(), key=lambda e: (e.occurred_at, e.transaction_id))
+
+
+def metrics(events):
+    payments = [e for e in events if e.kind == "payment"]
     incoming = sum(e.amount for e in payments)
-    outgoing = sum(e.amount for e in refunds)
+    outgoing = sum(e.amount for e in events if e.kind == "refund")
     return {"paid_orders": len({e.order_id for e in payments}), "payments": incoming,
             "refunds": outgoing, "net_cash": incoming - outgoing,
             "td_buyers": len({e.order.client_id for e in payments if e.order.product == "trial"})}
 
 
+def moscow_date(e):
+    return e.occurred_at.astimezone(MOSCOW).date()
+
+
 def make_report(start, end, studio):
-    lower, upper = date_bounds(start, end)
-    network = Event.objects.filter(status="success", occurred_at__gte=lower, occurred_at__lt=upper).select_related("order").order_by("occurred_at", "event_id")
-    rows = [e for e in network if not studio or e.order.studio_id == studio]
-    payments = [e for e in rows if e.kind == "payment"]
-    refunds = unique_transactions([e for e in rows if e.kind == "refund"])
-    summary = metrics(payments, refunds)
-    summary["td_buyers"] = len({e.order.client_id for e in network if e.kind == "payment" and e.order.product == "trial"})
+    first, last = parse_period(start, end)
+    events = money_events(*date_bounds(first, last), studio)
+
+    by_day = {}
+    for e in events:
+        by_day.setdefault(moscow_date(e), []).append(e)
     daily = []
-    current, last = date.fromisoformat(start), date.fromisoformat(end)
-    while current <= last:
-        p = [e for e in payments if e.occurred_at.astimezone(MOSCOW).date() == current]
-        r = [e for e in refunds if e.occurred_at.astimezone(MOSCOW).date() == current]
-        values = metrics(p, r)
-        daily.append({"date": current.isoformat(), **{k: values[k] for k in ("payments", "refunds", "net_cash")}})
-        current += timedelta(days=1)
-    studios = []
-    for s in Studio.objects.order_by("id"):
-        if studio and s.id != studio:
-            continue
-        studios.append({"id": s.id, "title": s.title,
-                        **metrics([e for e in payments if e.order.studio_id == s.id],
-                                  [e for e in refunds if e.order.studio_id == s.id])})
+    for offset in range((last - first).days + 1):
+        values = metrics(by_day.get(first + timedelta(days=offset), []))
+        daily.append({"date": (first + timedelta(days=offset)).isoformat(),
+                      **{k: values[k] for k in ("payments", "refunds", "net_cash")}})
+
+    studio_rows = Studio.objects.order_by("id")
+    if studio:
+        studio_rows = studio_rows.filter(pk=studio)
+    studios = [{"id": s.id, "title": s.title, **metrics([e for e in events if e.order.studio_id == s.id])}
+               for s in studio_rows]
+
     operations = [{"transaction_id": e.transaction_id, "order_id": e.order_id,
                    "client_id": e.order.client_id, "studio_id": e.order.studio_id,
                    "product": e.order.product, "kind": e.kind, "amount": e.amount,
-                   "occurred_at": e.occurred_at.isoformat(),
-                   "date": e.occurred_at.astimezone(MOSCOW).date().isoformat()}
-                  for e in sorted(payments + refunds, key=lambda e: (e.occurred_at, e.transaction_id))]
-    return {"filters": {"start": start, "end": end, "studio": studio}, "summary": summary,
+                   "occurred_at": e.occurred_at.astimezone(MOSCOW).isoformat(),
+                   "date": moscow_date(e).isoformat()}
+                  for e in events]
+    return {"filters": {"start": start, "end": end, "studio": studio}, "summary": metrics(events),
             "daily": daily, "studios": studios, "operations": operations}
