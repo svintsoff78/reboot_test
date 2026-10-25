@@ -13,3 +13,6 @@ __pycache__/
 .DS_Store
 .claude/
 REBOOT_ТЗ_Fullstack.pdf
+e2e/shots/
+e2e/results.json
+e2e/report.html
