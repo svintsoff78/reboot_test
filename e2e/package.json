@@ -2,10 +2,10 @@
   "name": "reboot-e2e",
   "private": true,
   "type": "module",
-  "description": "Прокликивание интерфейса в установленном Google Chrome и сборка REPORT.pdf",
+  "description": "Прокликивание интерфейса в установленном Google Chrome и сборка REPORT_product.pdf и REPORT_dev.pdf",
   "scripts": {
     "clickthrough": "node clickthrough.mjs",
-    "pdf": "node make-pdf.mjs ../REPORT.pdf"
+    "pdf": "node make-pdf.mjs .."
   },
   "devDependencies": {
     "playwright-core": "1.56.1"

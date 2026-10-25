@@ -15,4 +15,4 @@ __pycache__/
 REBOOT_ТЗ_Fullstack.pdf
 e2e/shots/
 e2e/results.json
-e2e/report.html
+e2e/*.html
