@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createReportLoader } from '../src/reportLoader'
 import { rubles, type Filters, type Report } from '../src/api'
-import { moscowDateTime, periodDays, periodLabel, validatePeriod } from '../src/format'
+import { filtersFromQuery, filtersToQuery, moscowDateTime, periodDays, periodLabel, validatePeriod } from '../src/format'
 
 const report = (filters: Filters): Report => ({ filters,
   summary: { paid_orders: 0, payments: 0, refunds: 0, net_cash: 0, td_buyers: 0 }, daily: [], studios: [], operations: [] })
@@ -78,5 +78,20 @@ describe('Правило: время и деньги в интерфейсе', (
   })
   it('отрицательный поток и копейки сохраняются', () => {
     expect(rubles(-30_001).replace(/\s/g, '')).toBe('-300,01₽')
+  })
+})
+
+describe('Правило: выбранные фильтры переживают перезагрузку страницы', () => {
+  const defaults: Filters = { start: '2026-04-01', end: '2026-04-30', studio: '' }
+  it('фильтры из адреса восстанавливаются, а в адрес записываются те же', () => {
+    const f = { start: '2026-05-01', end: '2026-05-31', studio: 'S02' }
+    expect(filtersToQuery(f)).toBe('?start=2026-05-01&end=2026-05-31&studio=S02')
+    expect(filtersFromQuery(filtersToQuery(f), defaults)).toEqual(f)
+    expect(filtersToQuery(defaults)).toBe('?start=2026-04-01&end=2026-04-30')
+  })
+  it('неверный период в адресе заменяется периодом по умолчанию, студия сохраняется', () => {
+    expect(filtersFromQuery('', defaults)).toEqual(defaults)
+    expect(filtersFromQuery('?start=2026-05-31&end=2026-05-01&studio=S03', defaults)).toEqual({ ...defaults, studio: 'S03' })
+    expect(filtersFromQuery('?start=2026-05-01', defaults)).toEqual(defaults)
   })
 })

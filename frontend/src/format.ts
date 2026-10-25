@@ -50,3 +50,18 @@ export function plural(n: number, one: string, few: string, many: string) {
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few
   return many
 }
+
+/** Фильтры из адресной строки (?start=…&end=…&studio=…); при неверном периоде — значения по умолчанию. */
+export function filtersFromQuery(search: string, defaults: Filters): Filters {
+  const query = new URLSearchParams(search)
+  const start = query.get('start') ?? '', end = query.get('end') ?? ''
+  const studio = (query.get('studio') ?? '').trim()
+  if (!start && !end) return { ...defaults, studio }
+  return validatePeriod({ start, end }) ? { ...defaults, studio } : { start, end, studio }
+}
+
+export function filtersToQuery(filters: Filters): string {
+  const query = new URLSearchParams({ start: filters.start, end: filters.end })
+  if (filters.studio) query.set('studio', filters.studio)
+  return `?${query}`
+}

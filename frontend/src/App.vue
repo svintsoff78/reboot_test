@@ -2,11 +2,12 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { fetchStudios, rubles, type Filters, type Metrics, type Studio } from './api'
 import { createReportLoader } from './reportLoader'
-import { periodLabel, validatePeriod } from './format'
+import { filtersFromQuery, filtersToQuery, periodLabel, validatePeriod } from './format'
 import DailyChart from './DailyChart.vue'
 import OperationsTable from './OperationsTable.vue'
 
-const filters = reactive<Filters>({ start: '2026-04-01', end: '2026-04-30', studio: '' })
+// Начальные фильтры — из адреса страницы, чтобы отчёт переживал перезагрузку и им можно было поделиться.
+const filters = reactive<Filters>(filtersFromQuery(location.search, { start: '2026-04-01', end: '2026-04-30', studio: '' }))
 const studios = ref<Studio[]>([])
 const catalogError = ref('')
 const formError = ref('')
@@ -22,10 +23,18 @@ const studioName = (id: string) => (id ? studioTitles.value[id] ?? id : 'Вся 
 const dirty = computed(() => !!applied.value && (applied.value.start !== filters.start
   || applied.value.end !== filters.end || applied.value.studio !== filters.studio))
 const isEmpty = computed(() => !!report.value && report.value.operations.length === 0)
+/** Короткое сообщение для экранного диктора вместо зачитывания всего отчёта. */
+const statusText = computed(() => {
+  if (state.value.status === 'loading') return 'Загружаем отчёт…'
+  if (!report.value || !applied.value) return ''
+  const where = `${periodLabel(applied.value.start, applied.value.end)}, ${studioName(applied.value.studio)}`
+  return isEmpty.value ? `Нет операций: ${where}.` : `Отчёт обновлён: ${where}. Платежи ${rubles(report.value.summary.payments)}.`
+})
 
 function apply() {
   formError.value = validatePeriod(filters)
   if (formError.value) return
+  history.replaceState(null, '', filtersToQuery(filters))
   void load({ ...filters })
 }
 /** Клик по студии или «Вся сеть»: меняет общий фильтр, сохраняя применённый период. */
@@ -76,7 +85,8 @@ const show = (value: number, money: boolean) => (money ? rubles(value) : value.t
     </form>
     <p v-if="catalogError" class="notice panel" role="alert">{{ catalogError }} <button class="text-button" @click="catalog">Повторить список</button></p>
 
-    <section aria-live="polite" :aria-busy="state.status === 'loading'">
+    <p class="sr-only" role="status">{{ statusText }}</p>
+    <section :aria-busy="state.status === 'loading'">
       <p v-if="applied" class="report-period">
         <strong>{{ periodLabel(applied.start, applied.end) }}</strong> · {{ studioName(applied.studio) }}
         <button v-if="applied.studio && state.status !== 'loading'" type="button" class="text-button" @click="selectStudio('')">← Вся сеть</button>
